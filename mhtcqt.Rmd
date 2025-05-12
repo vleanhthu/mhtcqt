@@ -1,0 +1,214 @@
+---
+title: "Untitled"
+author: "anhthu"
+date: "2025-04-17"
+output: word_document
+---
+
+```{r}
+library(readxl)
+library(tseries)
+```
+
+```{r}
+MHTCQT <- read_excel("~/Đại Học/mô hình tài chính quốc tế/MHTCQT.xlsx")
+View(MHTCQT)
+```
+
+```{r}
+#CHUYỂN NA SANG giá trị rỗng
+MHTCQT$`Tỷ suất sinh lời USD/VND`[1] <- ""
+MHTCQT$`Tỷ suất sinh lời CNY/VND`[1] <- ""
+```
+
+```{r}
+str(MHTCQT)
+```
+```{r}
+# Chuyển cột "Tỷ suất sinh lời USD/VND" sang dạng số
+MHTCQT$`Tỷ suất sinh lời USD/VND` <- as.numeric(MHTCQT$`Tỷ suất sinh lời USD/VND`)
+
+# Chuyển cột "Tỷ suất sinh lời CNY/VND" sang dạng số
+MHTCQT$`Tỷ suất sinh lời CNY/VND` <- as.numeric(MHTCQT$`Tỷ suất sinh lời CNY/VND`)
+```
+
+
+```{r}
+# Vẽ histogram cho tỷ suất sinh lời USD/VND
+hist(MHTCQT$`Tỷ suất sinh lời USD/VND`, 
+     main = "Tỷ suất sinh lời USD/VND",
+     xlab = "Tỷ suất sinh lời", 
+     col = "lightblue",
+     breaks = 15)
+```
+```{r}
+# Vẽ histogram CNY/VND
+hist(MHTCQT$`Tỷ suất sinh lời CNY/VND`, 
+     main = "Tỷ suất sinh lời CNY/VND",
+     xlab = "Tỷ suất sinh lời", 
+     col = "lightgreen")
+```
+
+```{r}
+#Kiểm định phân phối chuẩn của chuỗi tỷ suất sinh lời
+jarque.bera.test(na.omit(MHTCQT$`Tỷ suất sinh lời USD/VND`))
+jarque.bera.test(na.omit(MHTCQT$`Tỷ suất sinh lời CNY/VND`))
+```
+#cả 2 ko phân phối chuẩn 
+```{r}
+#Thống kê mô tả của chuỗi tỷ giá
+summary(MHTCQT$`USD/VND`)
+summary(MHTCQT$`CNY/VND`)
+```
+```{r}
+#Thống kê mô tả chuỗi tỷ suất sinh lời
+summary(MHTCQT$`Tỷ suất sinh lời USD/VND`, na.rm = TRUE)
+summary(MHTCQT$`Tỷ suất sinh lời CNY/VND`, na.rm = TRUE)
+```
+#câu 2
+```{r}
+#Độ lệch chuẩn để so sánh biến động tỷ giá
+volatility_usd_vnd <- sd(MHTCQT$`Tỷ suất sinh lời USD/VND`, na.rm = TRUE)
+volatility_cny_vnd <- sd(MHTCQT$`Tỷ suất sinh lời CNY/VND`, na.rm = TRUE)
+volatility_usd_vnd
+volatility_cny_vnd
+```
+#câu 6
+```{r}
+#tạo chuỗi thời gian
+ts_usdvnd <- ts(MHTCQT$`USD/VND`, frequency = 5)
+```
+
+```{r}
+# Vẽ biểu đồ chuỗi thời gian để xem xu hướng
+library(ggplot2)
+ggplot(MHTCQT, aes(x = MHTCQT$Ngày, y = MHTCQT$`Tỷ suất sinh lời USD/VND`)) + 
+  geom_line() + 
+  labs(title = "Biến động tỷ suất sinh lời USD/VND", x = "Thời gian", y = "Tỷ suất sinh lợi")
+```
+```{r}
+# Kiểm tra tính dừng
+library(tseries)
+if (is.na(MHTCQT$`Tỷ suất sinh lời USD/VND`[1])) {
+  adf.test(MHTCQT$`Tỷ suất sinh lời USD/VND`[-1])
+} else {
+  adf.test(MHTCQT$`Tỷ suất sinh lời USD/VND`)
+}
+```
+#chuỗi dừng
+
+```{r}
+# Tìm mô hình ARIMA tối ưu
+library(forecast)
+
+# Kiểm tra và loại bỏ NA ở dòng đầu tiên của chuỗi tỷ suất sinh lời
+if (is.na(MHTCQT$`Tỷ suất sinh lời USD/VND`[1])) {
+  ts_return_cleaned <- MHTCQT$`Tỷ suất sinh lời USD/VND`[-1]
+} else {
+  ts_return_cleaned <- MHTCQT$`Tỷ suất sinh lời USD/VND`
+}
+```
+
+```{r}
+#vẽ acf pacf
+acf(ts_return_cleaned, main = "ACF")   
+pacf(ts_return_cleaned, main = "PACF")
+```
+
+```{r}
+#arima
+reg302 <- arima(ts_return_cleaned,order = c(3,0,2))
+reg302
+
+reg202 <- arima(ts_return_cleaned,order = c(2,0,2))
+reg202
+
+reg102 <- arima(ts_return_cleaned,order = c(1,0,2))
+reg102
+
+reg103 <- arima(ts_return_cleaned,order = c(1,0,3))
+reg103
+
+reg303 <- arima(ts_return_cleaned,order = c(3,0,3))
+reg303
+```
+
+
+```{r}
+# Mô hình GARCH cho phần biến động
+library(rugarch)
+spec <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                  mean.model = list(armaOrder = c(1,3),include.mean = TRUE))
+garch_model <- ugarchfit(spec, ts_return_cleaned)
+summary(garch_model)
+
+# Dự báo 10 ngày tiếp theo
+forecast_garch <- ugarchforecast(garch_model, n.ahead = 10)
+forecast_garch
+```
+
+```{r}
+# Lấy giá trị tỷ giá ngày cuối cùng
+last_exchange_rate <- tail(MHTCQT$`USD/VND`, 1)
+
+# Chuyển dự báo logreturn sang tỷ giá
+forecast_returns <- as.numeric(fitted(forecast_garch))
+forecast_exchange_rates <- last_exchange_rate * exp(cumsum(forecast_returns))
+
+# In dự báo
+data.frame(
+  Ngay = seq.Date(from = as.Date(max(MHTCQT$Ngày)) + 1, by = "day", length.out = 10),
+  LogReturn_DuBao = forecast_returns,
+  TyGia_DuBao = forecast_exchange_rates
+)
+```
+```{r}
+#dùng tỷ giá để dự báo
+adf.test(MHTCQT$`USD/VND`)
+adf.test(diff(MHTCQT$`USD/VND`))
+```
+```{r}
+AIC(reg_111)
+infocriteria(garch_model)
+```
+
+
+```{r}
+#vẼ acf pacf
+acf(diff(MHTCQT$`USD/VND`), main = "ACF")   
+pacf(diff(MHTCQT$`USD/VND`), main = "PACF")
+```
+```{r}
+#arima
+reg_312 <- arima(MHTCQT$`USD/VND`,order = c(3,1,2))
+reg_312
+
+reg_313 <- arima(MHTCQT$`USD/VND`,order = c(3,1,3))
+reg_313
+
+reg_212 <- arima(MHTCQT$`USD/VND`,order = c(2,1,2))
+reg_212
+
+reg213 <- arima(MHTCQT$`USD/VND`,order = c(2,1,3))
+reg213
+
+reg_112 <- arima(MHTCQT$`USD/VND`,order = c(1,1,2))
+reg_112
+
+reg_111 <- arima(MHTCQT$`USD/VND`,order = c(1,1,1))
+reg_111
+
+reg_311 <- arima(MHTCQT$`USD/VND`,order = c(3,1,1))
+reg_311
+
+reg_310 <- arima(MHTCQT$`USD/VND`,order = c(3,1,0))
+reg_310
+```
+
+=> chọn (1,1,1)
+```{r}
+forecast_rate <- forecast(reg_111, h = 10) # Dự báo 10 ngày tới
+print(forecast_rate)
+plot(forecast_rate, main = "Dự báo Tỷ giá USD/VND")
+```
+
