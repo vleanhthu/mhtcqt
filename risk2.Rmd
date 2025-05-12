@@ -1,0 +1,567 @@
+---
+title: "Untitled"
+author: "anhthu"
+date: "2025-04-28"
+output: word_document
+---
+
+```{r}
+#IMPORT DATA
+library(readxl)
+Book1 <- read_excel("~/Đại Học/Book1.xlsx")
+View(Book1)
+```
+
+
+```{r}
+str(Book1)
+```
+```{r}
+Book1$PAY_0 <- ifelse(Book1$PAY_0 %in% c(-1, -2), 0, Book1$PAY_0)
+Book1$PAY_2 <- ifelse(Book1$PAY_2 %in% c(-1, -2), 0, Book1$PAY_2)
+Book1$PAY_3 <- ifelse(Book1$PAY_3 %in% c(-1, -2), 0, Book1$PAY_3)
+Book1$PAY_4 <- ifelse(Book1$PAY_4 %in% c(-1, -2), 0, Book1$PAY_4)
+Book1$PAY_5 <- ifelse(Book1$PAY_5 %in% c(-1, -2), 0, Book1$PAY_5)
+Book1$PAY_6 <- ifelse(Book1$PAY_6 %in% c(-1, -2), 0, Book1$PAY_6)
+
+# Kiểm tra kết quả
+head(Book1,6)
+```
+
+
+```{r}
+#Xem các giá trị âm trong các cột BILL và PAY ATM
+library(dplyr)
+Book1 %>%
+  filter(if_any(c(BILL_AMT1:BILL_AMT6, PAY_AMT1:PAY_AMT6), ~ . < 0))
+```
+```{r}
+# Thay các giá trị <0 trong các cột BILL_AMT1:BILL_AMT6 và PAY_AMT1:PAY_AMT6 bằng 0
+cols_to_check <- c("BILL_AMT1", "BILL_AMT2", "BILL_AMT3", "BILL_AMT4", "BILL_AMT5", "BILL_AMT6", 
+                   "PAY_AMT1", "PAY_AMT2", "PAY_AMT3", "PAY_AMT4", "PAY_AMT5", "PAY_AMT6")
+
+for (col in cols_to_check) {
+  Book1[[col]] <- ifelse(Book1[[col]] < 0, 0, Book1[[col]])
+}
+```
+
+```{r}
+#Xem cột education 
+Book1 %>%
+  filter(EDUCATION <= 0|EDUCATION %in% c(5,6))
+```
+```{r}
+# Thay thế các giá trị không phù hợp trong EDUCATION = 4
+Book1$EDUCATION <- ifelse(Book1$EDUCATION %in% c(0, 5, 6), 4, Book1$EDUCATION)
+```
+
+
+```{r}
+#Xem cột marriage 
+Book1 %>%
+  filter(MARRIAGE <= 0)
+```
+
+```{r}
+# Thay thế giá trị không hợp lệ trong MARRIAGE bằng 3
+Book1$MARRIAGE <- ifelse(Book1$MARRIAGE == 0, 3, Book1$MARRIAGE)
+```
+
+```{r}
+#Bỏ cột ID
+library(dplyr)
+Book1 <- subset(Book1, select = -ID)
+View(Book1)
+```
+
+
+```{r}
+# Chuyển đổi các biến phân loại thành factor
+cols_to_factor <- c("SEX", "EDUCATION", "MARRIAGE", "default.payment.next.month")
+
+Book1[cols_to_factor] <- lapply(Book1[cols_to_factor], as.factor)
+```
+
+```{r}
+# Descriptive statistic
+summary(Book1)
+```
+
+
+```{r}
+#Xem biến trạng thái default.payment.next.month (1,0)
+table(Book1$default.payment.next.month)
+```
+
+```{r}
+prop.table(table(Book1$default.payment.next.month))
+```
+
+```{r}
+# Chọn các biến numeric
+numeric_vars <- Book1[, sapply(Book1, is.numeric)]
+
+#Check outliers
+find_outliers <- function(x) {
+  Q1 <- quantile(x, 0.25, na.rm = TRUE)
+  Q3 <- quantile(x, 0.75, na.rm = TRUE)
+  IQR <- Q3 - Q1
+  outliers <- which(x < (Q1 - 1.5 * IQR) | x > (Q3 + 1.5 * IQR))
+  return(outliers)
+}
+
+# Tính outlier cho từng biến
+outlier_summary <- sapply(numeric_vars, function(x) length(find_outliers(x)))
+
+# In ra kết quả
+outlier_summary
+```
+```{r}
+# Cắt ngưỡng LIMIT_BAL và AGE nếu cần
+library(dplyr)
+
+# Winsorize ở ngưỡng 1% và 99%
+winsorize <- function(x, lower_quantile=0.01, upper_quantile=0.99){
+  lower <- quantile(x, lower_quantile)
+  upper <- quantile(x, upper_quantile)
+  x[x < lower] <- lower
+  x[x > upper] <- upper
+  return(x)
+}
+
+Book1$LIMIT_BAL <- winsorize(Book1$LIMIT_BAL)
+Book1$AGE <- winsorize(Book1$AGE)
+View(Book1)
+```
+
+
+```{r}
+# Check NA
+colSums(is.na(Book1))
+```
+```{r}
+View(Book1)
+str(Book1)
+```
+
+
+#MÔ HÌNH LOGIT VỚI BIẾN GỐC
+
+```{r}
+names(Book1)
+```
+```{r}
+Book1 <- Book1[c("LIMIT_BAL", "SEX", "EDUCATION", "MARRIAGE", "AGE", "PAY_0", "PAY_2", "PAY_3", 
+                 "PAY_4", "PAY_5", "PAY_6", "BILL_AMT1", "BILL_AMT2", "BILL_AMT3", "BILL_AMT4", 
+                 "BILL_AMT5", "BILL_AMT6", "PAY_AMT1", "PAY_AMT2", "PAY_AMT3", "PAY_AMT4", 
+                 "PAY_AMT5", "PAY_AMT6", "default.payment.next.month")]
+```
+
+
+```{r}
+library(caret)
+# Chia dữ liệu thành train (70%) và test (30%)
+set.seed(123)  # Đặt seed để đảm bảo tính tái lặp
+train_idx <- createDataPartition(Book1$default.payment.next.month, p = 0.7, list = FALSE)
+
+# Tạo tập train và test
+train_df <- Book1[train_idx, ]
+test_df <- Book1[-train_idx, ]
+```
+
+
+```{r}
+# Xây dựng mô hình logistic với dữ liệu huấn luyện
+model_raw <- glm(default.payment.next.month ~ ., family = binomial, data = train_df)
+summary(model_raw)
+```
+
+```{r}
+model_step <- step(model_raw, direction = "both")
+summary(model_step)
+```
+
+```{r}
+model_end <- glm(default.payment.next.month ~ MARRIAGE + PAY_0 + PAY_3 + PAY_6 +
+                   BILL_AMT3 + BILL_AMT5 + PAY_AMT1 + PAY_AMT2,
+                   family = binomial, data = train_df)
+summary(model_end)
+```
+```{r}
+# Dự đoán xác suất (probability)
+prob_test <- predict(model_end, newdata = test_df, type = "response")
+# Dự đoán nhãn
+pred_class <- ifelse(prob_test >= 0.5, 1, 0)
+# Ma trận nhầm lẫn
+table(Predicted = pred_class, Actual = test_df$default.payment.next.month)
+```
+
+```{r}
+library(pROC)
+# Tính AUC
+roc_obj <- roc(test_df$default.payment.next.month, prob_test)
+auc(roc_obj)
+
+# Vẽ đường ROC
+plot(roc_obj, col = "blue", main = "ROC Curve - Model Logistic")
+```
+```{r}
+# Accuracy
+mean(pred_class == test_df$default.payment.next.month)
+```
+
+
+#các biến gốc dạng phân loại nhiều levels, nhiều biến giả phát sinh => gây đa cộng tuyến => dẫn đến hiện tượng singularities => chuyển sang dùng logit với biến WOE
+
+
+#MÔ HÌNH LOGIT VỚI BIẾN WOE CHỌN THEO INFORMATIONVALUE
+```{r}
+library('ROSE')
+```
+
+```{r}
+# Xác định biến mục tiêu
+target_variable <- "default.payment.next.month"
+
+# Loại bỏ biến ID (nếu có) và biến mục tiêu khỏi danh sách các biến cần tính IV
+variables_to_calculate_iv <- names(Book1)[!(names(Book1) %in% c("ID", target_variable))]
+
+# Hàm để tính Information Value cho một biến
+calculate_iv <- function(data, variable, target) {
+  # Kiểm tra kiểu dữ liệu của biến
+  if (is.numeric(data[[variable]])) {
+    # Phân nhóm cho biến số
+    data[[paste0(variable, "_BIN")]] <- cut(data[[variable]], breaks = 10, labels = FALSE, include.lowest = TRUE)
+    bin_variable <- paste0(variable, "_BIN")
+  } else {
+    # Sử dụng trực tiếp các giá trị của biến rời rạc
+    bin_variable <- variable
+  }
+
+  # Tính số lượng Good và Bad trong mỗi nhóm
+  group_data <- aggregate(data[[target]] ~ data[[bin_variable]], data = data,
+                            FUN = function(x) c(Bad = sum(x == 1), Good = sum(x == 0)))
+  names(group_data) <- c("Bin", "Counts")
+  group_data$Bad <- group_data$Counts[, "Bad"]
+  group_data$Good <- group_data$Counts[, "Good"]
+  group_data$Counts <- NULL
+
+  # Tính tổng số Good và Bad
+  total_bad <- sum(group_data$Bad)
+  total_good <- sum(group_data$Good)
+
+  # Tính tỷ lệ Good và Bad cho mỗi nhóm
+  group_data$BadRate <- group_data$Bad / total_bad
+  group_data$GoodRate <- group_data$Good / total_good
+
+  # Xử lý trường hợp tỷ lệ bằng 0
+  group_data$BadRate[group_data$BadRate == 0] <- 1e-06
+  group_data$GoodRate[group_data$GoodRate == 0] <- 1e-06
+
+  # Tính Weight of Evidence (WoE)
+  group_data$WoE <- log(group_data$BadRate / group_data$GoodRate)
+
+  # Tính sự khác biệt giữa tỷ lệ Bad và Good
+  group_data$Difference <- group_data$BadRate - group_data$GoodRate
+
+  # Tính Information Value (IV) cho mỗi nhóm
+  group_data$IV_Group <- group_data$Difference * group_data$WoE
+
+  # Tính tổng Information Value (IV) cho biến
+  IV_Total <- sum(group_data$IV_Group)
+
+  if (is.numeric(data[[variable]])) {
+    data[[paste0(variable, "_BIN")]] <- NULL # Xóa cột bin sau khi tính toán
+  }
+
+  return(data.frame(Variable = variable, IV = IV_Total))
+}
+
+# Lưu trữ kết quả IV cho tất cả các biến
+iv_results <- data.frame(Variable = character(), IV = numeric())
+
+# Lặp qua từng biến và tính IV
+for (variable in variables_to_calculate_iv) {
+  iv <- calculate_iv(Book1, variable, target_variable)
+  iv_results <- rbind(iv_results, iv)
+}
+
+# In ra kết quả IV
+print(iv_results)
+
+# Bạn có thể sắp xếp kết quả theo giá trị IV để xem các biến quan trọng hơn
+iv_results_sorted <- iv_results[order(-iv_results$IV), ]
+print(iv_results_sorted)
+```
+
+```{r}
+#c2: library(scorecard)
+
+# Tính IV:
+#IV = iv(Book1, y = "default.payment.next.month")
+
+# Xem kết quả:
+#print(IV)
+```
+
+```{r}
+#Loại các biến có IV nhỏ hơn 0.02 
+library(dplyr)
+
+# Lọc các biến có IV nhỏ hơn 0.02 và lấy tên biến
+vars_removed <- iv_results %>%
+  filter(IV < 0.02) %>%
+  pull(Variable)
+
+# In ra danh sách các biến bị loại bỏ
+print("Các biến bị loại bỏ (IV < 0.02):")
+print(vars_removed)
+```
+
+```{r}
+#Tạo dữ liệu sau khi lọc biến
+Book1_filtered <- Book1 %>%
+  dplyr::select(-all_of(vars_removed))
+head(Book1_filtered,6)
+```
+
+
+```{r}
+# train 70% - test 30%
+set.seed(123) 
+
+# Lấy ngẫu nhiên các chỉ số cho tập huấn luyện (70%)
+ind <- sample(2, nrow(Book1_filtered), replace = TRUE, prob = c(0.7, 0.3))
+
+# Tạo tập huấn luyện
+train.data <- Book1_filtered[ind == 1, ]
+
+# Tạo tập kiểm tra
+test.data <- Book1_filtered[ind == 2, ]
+```
+
+#Bin các biến theo WOE
+```{r}
+library("scorecard")
+bins <- woebin(train.data, y = "default.payment.next.month")
+woebin_plot(bins)
+```
+# Chạy mô hình logit - Thực hiện trên tập train:
+```{r}
+train.data_woe <- woebin_ply(train.data, bins)
+logit.model <- glm(default.payment.next.month ~., family = binomial(link = 'logit'), data = train.data_woe)
+summary(logit.model)
+```
+
+#Lọc biến mô hình logit theo stepwise
+```{r}
+logit.step <- step(logit.model, direction = "backward", trace = 0)
+summary(logit.step)
+```
+#Validate mô hình - confusionMatrix trên tập train
+```{r}
+train.prob <- predict(logit.step, type = "response")
+train.pred <- ifelse(train.prob > .5, "1", "0")
+table.train<-table(train.pred, train.data$default.payment.next.month)
+table.train
+```
+```{r}
+confusionMatrix.train<-prop.table(table.train)
+confusionMatrix.train
+```
+#Validate mô hình - confusionMatrix trên tập test
+```{r}
+#Chuyển dữ liệu theo woe
+test.data_woe <- woebin_ply(test.data, bins)
+head(test.data_woe)
+```
+
+```{r}
+test.pred.prob <- predict(logit.model, test.data_woe, type = 'response')
+test.pred<- as.factor(ifelse(test.pred.prob > 0.5, 1, 0))
+table.test<-table(test.pred, test.data$default.payment.next.month)
+table.test
+```
+
+```{r}
+confusionMatrix.test<-prop.table(table.test)
+confusionMatrix.test
+```
+
+#Chỉ tiểu khác
+```{r}
+library(caret)
+sensitivity(test.pred, test.data$default.payment.next.month)
+```
+
+```{r}
+specificity(test.pred, test.data$default.payment.next.month)
+```
+
+#Vẽ đường cong ROC
+```{r}
+library(ROCR)
+```
+
+```{r}
+# Logistic Regression ROC curve
+mask <- !is.na(test.pred.prob) & !is.na(test.data$default.payment.next.month)
+roc.pred <- prediction(predictions = test.pred.prob[mask], labels = test.data$default.payment.next.month[mask])
+roc.perf <- performance(roc.pred, measure = "tpr", x.measure = "fpr")
+# Tính chỉ số AUROC
+AUROC_value <- roc.perf@y.values[[1]]
+auc <- as.numeric(performance(roc.pred, measure = "auc")@y.values)
+plot(roc.perf, main = "ROC Curve for credit risk Prediction Approaches", col = 2, lwd = 2)
+abline(a = 0, b = 1, lwd = 3, lty = 2, col = 1)
+```
+
+```{r}
+# Tính chỉ số AUROC và GINI
+auc <- as.numeric(performance(roc.pred, measure = "auc")@y.values)
+auc
+```
+```{r}
+gini <- 2*auc - 1
+gini
+```
+
+#Thực hiện tính score:
+```{r}
+# Calculate scorecard scores for variables based on the results from woebin and glm: 
+my_card <- scorecard(bins, logit.model, points0 = 600, odds0 = 1/19, pdo = 50)
+head(my_card)
+```
+
+#results
+```{r}
+# Calculate scorecard scores
+z_score<-log(train.prob/(1-train.prob))
+head(z_score,10)
+```
+
+#scalling Factor & Offset
+```{r}
+credit_score <-100+2*z_score
+hist(credit_score)
+```
+
+```{r}
+head(credit_score,10)
+```
+
+#RANDOM FOREST 
+
+```{r}
+#Chia dữ liệu
+set.seed(123) 
+abc <- sample(2, nrow(Book1), replace = TRUE, prob = c(0.7, 0.3))
+train_data <- Book1[abc == 1, ]
+test_data <- Book1[abc == 2, ]
+```
+
+```{r}
+# Xác định biến mục tiêu (default.payment.next.month) và các biến dự đoán
+dependent_variable <- "default.payment.next.month"
+predictor_variables <- names(train_data)[names(train_data) != dependent_variable]
+```
+
+```{r}
+library(randomForest)
+#Huấn luyện mô hình Random Forest
+rf_model <- randomForest(as.formula(paste(dependent_variable, "~ .")),
+                         data = train_data,
+                         ntree = 100)
+print(rf_model)
+```
+```{r}
+#Dự đoán trên tập kiểm tra
+pred <- predict(rf_model, newdata = test_data)
+#Đánh giá hiệu suất của mô hình
+confusion_matrix <- confusionMatrix(pred, test_data[[dependent_variable]])
+print(confusion_matrix)
+```
+```{r}
+library(dplyr)
+library(caret)
+library(pROC)
+library(ggplot2)
+```
+
+
+```{r}
+# Tính toán ROC Curve và AUC
+roc_obj <- roc(test_data[[dependent_variable]], as.numeric(pred))
+auc_value <- auc(roc_obj)
+cat("AUC:", auc_value, "\n")
+
+# Vẽ ROC Curve bằng ggplot2
+roc_df <- data.frame(
+  TPR = roc_obj$sensitivities,
+  FPR = 1 - roc_obj$specificities
+)
+
+ggplot(roc_df, aes(x = FPR, y = TPR)) +
+  geom_line(color = "blue", linewidth = 1) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red") +
+  labs(
+    title = paste("ROC Curve (AUC =", round(auc_value, 3), ")"),
+    x = "False Positive Rate",
+    y = "True Positive Rate (Sensitivity)"
+  ) +
+  theme_bw()
+```
+#K-NEARESR NEIGHBORS
+
+```{r}
+sum(is.na(Book1))
+```
+
+
+```{r}
+# Tạo X và Y
+X <- Book1[, setdiff(names(Book1), "default.payment.next.month")]
+Y <- Book1$default.payment.next.month
+# Chuyển factor thành numeric
+X <- X %>% mutate(across(c(SEX, EDUCATION, MARRIAGE, PAY_0, PAY_2, PAY_3, PAY_4, PAY_5, PAY_6), as.numeric))
+# Chuẩn hóa X
+X_scaled <- as.data.frame(scale(X))
+```
+
+```{r}
+set.seed(123)  # cho kết quả reproducible
+library(caret)
+
+train_index <- createDataPartition(Y, p = 0.7, list = FALSE)
+X_train <- X_scaled[train_index, ]
+X_test <- X_scaled[-train_index, ]
+Y_train <- Y[train_index]
+Y_test <- Y[-train_index]
+```
+
+```{r}
+library(class)
+
+# Chọn k=16 
+knn_pred <- knn(train = X_train, test = X_test, cl = Y_train, k = 16)
+```
+
+```{r}
+# Độ chính xác
+mean(knn_pred == Y_test)
+
+# Xem confusion matrix
+library(caret)
+confusionMatrix(knn_pred, factor(Y_test))
+```
+```{r}
+#chọn k tốt nhất
+k_values <- 1:20
+accuracy <- sapply(k_values, function(k) {
+  pred <- knn(train = X_train, test = X_test, cl = Y_train, k = k)
+  mean(pred == Y_test)
+})
+
+plot(k_values, accuracy, type = "b", col = "blue", xlab = "K", ylab = "Accuracy")
+```
+
+
